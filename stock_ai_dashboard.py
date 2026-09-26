@@ -1,6 +1,3 @@
-
-
-Files
 #!/usr/bin/env python3
 """
 AI Stock Trading Analysis Dashboard
@@ -219,15 +216,21 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         if df.empty or len(df) < 100:
             return "Niet genoeg data voor LSTM.", None, None
         
-        # Use Close prices, normalize
+        # Extract raw Close prices
         prices = df['Close'].values.astype(np.float32)
-        scaler = StandardScaler()
-        prices_scaled = scaler.fit_transform(prices.reshape(-1, 1)).flatten()
+        train_size = int(len(prices) * 0.8)
         
-        # Split
-        train_size = int(len(prices_scaled) * 0.8)
+        # Fit scaler ONLY on train set to prevent data leakage
+        scaler = StandardScaler()
+        train_prices = prices[:train_size].reshape(-1, 1)
+        scaler.fit(train_prices)
+        
+        # Transform full series
+        prices_scaled = scaler.transform(prices.reshape(-1, 1)).flatten()
+        
+        # Split datasets with overlap for sequence generation
         train_data = prices_scaled[:train_size]
-        test_data = prices_scaled[train_size - seq_len:]  # overlap for sequences
+        test_data = prices_scaled[train_size - seq_len:]
         
         train_ds = StockDataset(train_data, seq_len)
         test_ds = StockDataset(test_data, seq_len)
@@ -310,7 +313,6 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         
         # Chart
         test_dates = df.index[train_size:]
-        # Align lengths
         min_len = min(len(test_dates), len(actuals_inv))
         test_dates = test_dates[-min_len:]
         actuals_inv = actuals_inv[-min_len:]
