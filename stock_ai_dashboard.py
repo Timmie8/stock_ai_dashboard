@@ -340,7 +340,7 @@ def quick_scan(tickers_str):
     return "\n\n".join(results)
 
 # -----------------------
-# Gradio Interface (ALL UI COMPONENT CALLS MUST BE INSIDE THIS BLOCK)
+# Gradio Interface
 # -----------------------
 with gr.Blocks(title="AI Stock Trading Dashboard", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
@@ -387,4 +387,4 @@ with gr.Blocks(title="AI Stock Trading Dashboard", theme=gr.themes.Soft()) as de
         multi_btn.click(quick_scan, inputs=multi_in, outputs=multi_out)
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
+    demo.launch()
