@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
@@ -73,7 +73,6 @@ def run_ensemble(ticker, period="2y"):
             'SMA_20', 'SMA_50', 'EMA_12', 'EMA_26', 'MACD', 'MACD_signal', 'ADX',
             'RSI', 'Stoch', 'CCI', 'BB_high', 'BB_low', 'ATR', 'OBV', 'MFI', 'Return'
         ]
-        # Ensure columns exist
         available = [c for c in feature_cols if c in df.columns]
         X = df[available]
         y = df['Target']
@@ -95,7 +94,7 @@ def run_ensemble(ticker, period="2y"):
         gb_pred = gb.predict(X_test)
         gb_acc = accuracy_score(y_test, gb_pred)
         
-        # Ensemble vote (simple average of proba)
+        # Ensemble vote
         rf_proba = rf.predict_proba(X_test)[:, 1]
         gb_proba = gb.predict_proba(X_test)[:, 1]
         ensemble_proba = (rf_proba + gb_proba) / 2
@@ -109,7 +108,7 @@ def run_ensemble(ticker, period="2y"):
         ens_latest = (rf_latest + gb_latest) / 2
         direction = "📈 OMHOOG" if ens_latest > 0.55 else ("📉 OMLAAG" if ens_latest < 0.45 else "➡️ NEUTRAAL")
         
-        # Feature importance (average)
+        # Feature importance
         rf_imp = pd.Series(rf.feature_importances_, index=available)
         gb_imp = pd.Series(gb.feature_importances_, index=available)
         avg_imp = ((rf_imp + gb_imp) / 2).sort_values(ascending=False).head(10)
@@ -129,29 +128,25 @@ def run_ensemble(ticker, period="2y"):
 **Sector:** {sector}  
 **Market Cap:** {mcap_str}
 
-#### Model Performance (test set, walk-forward style)
+#### Model Performance (test set)
 - **Random Forest Accuracy:** {rf_acc:.1%}
 - **Gradient Boosting Accuracy:** {gb_acc:.1%}
-- **Ensemble (gemiddelde) Accuracy:** {ens_acc:.1%}
+- **Ensemble Accuracy:** {ens_acc:.1%}
 
 #### Laatste voorspelling (volgende dag)
 - **Ensemble kans op stijging:** {ens_latest:.1%}
 - **Signaal:** {direction}
 
-#### Top Feature Importance (gemiddeld RF + GB)
+#### Top Feature Importance
 """
         for feat, imp in avg_imp.items():
             summary += f"- {feat}: {imp:.3f}\n"
         
-        summary += """
-> **Let op:** Dit is een demonstratie-model op historische data. Past performance ≠ future results. Accuracies rond 45-55% zijn normaal voor next-day direction (markten zijn zeer noisy). Gebruik als research-tool, niet als blind advies.
-"""
-        
-        # Chart: price + RSI + prediction proba on test
+        # Charts
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
                             vertical_spacing=0.05,
                             row_heights=[0.5, 0.25, 0.25],
-                            subplot_titles=(f'{ticker} Prijs', 'RSI (14)', 'Ensemble Probability (test period)'))
+                            subplot_titles=(f'{ticker} Prijs', 'RSI (14)', 'Ensemble Probability'))
         
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
                                      low=df['Low'], close=df['Close'], name='Prijs'), row=1, col=1)
@@ -162,19 +157,13 @@ def run_ensemble(ticker, period="2y"):
         fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
         fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
         
-        # Proba on test set
         test_idx = X_test.index
         fig.add_trace(go.Scatter(x=test_idx, y=ensemble_proba, name='P(up)', line=dict(color='green')), row=3, col=1)
         fig.add_hline(y=0.5, line_dash="dash", line_color="gray", row=3, col=1)
         
         fig.update_layout(height=800, xaxis_rangeslider_visible=False, title_text=f"Ensemble ML Dashboard - {ticker}")
-        fig.update_yaxes(title_text="Prijs", row=1, col=1)
-        fig.update_yaxes(title_text="RSI", row=2, col=1)
-        fig.update_yaxes(title_text="P(stijging)", row=3, col=1)
         
-        # Importance bar
-        imp_fig = go.Figure(go.Bar(x=avg_imp.values[::-1], y=avg_imp.index[::-1], orientation='h',
-                                   marker_color='steelblue'))
+        imp_fig = go.Figure(go.Bar(x=avg_imp.values[::-1], y=avg_imp.index[::-1], orientation='h', marker_color='steelblue'))
         imp_fig.update_layout(title="Top 10 Feature Importance", height=400, xaxis_title="Importance")
         
         return summary, fig, imp_fig, f"Ensemble klaar voor {ticker}"
@@ -216,19 +205,15 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         if df.empty or len(df) < 100:
             return "Niet genoeg data voor LSTM.", None, None
         
-        # Extract raw Close prices
         prices = df['Close'].values.astype(np.float32)
         train_size = int(len(prices) * 0.8)
         
-        # Fit scaler ONLY on train set to prevent data leakage
         scaler = StandardScaler()
         train_prices = prices[:train_size].reshape(-1, 1)
         scaler.fit(train_prices)
         
-        # Transform full series
         prices_scaled = scaler.transform(prices.reshape(-1, 1)).flatten()
         
-        # Split datasets with overlap for sequence generation
         train_data = prices_scaled[:train_size]
         test_data = prices_scaled[train_size - seq_len:]
         
@@ -243,7 +228,6 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         
-        # Train
         model.train()
         losses = []
         for epoch in range(epochs):
@@ -258,10 +242,8 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
                 epoch_loss += loss.item()
             losses.append(epoch_loss / len(train_loader))
         
-        # Predict on test
         model.eval()
-        preds = []
-        actuals = []
+        preds, actuals = [], []
         with torch.no_grad():
             for x, y in test_loader:
                 x = x.unsqueeze(-1).to(device)
@@ -272,16 +254,13 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         preds = np.array(preds)
         actuals = np.array(actuals)
         
-        # Inverse scale
         preds_inv = scaler.inverse_transform(preds.reshape(-1, 1)).flatten()
         actuals_inv = scaler.inverse_transform(actuals.reshape(-1, 1)).flatten()
         
-        # Direction accuracy
         dir_actual = np.diff(actuals_inv) > 0
         dir_pred = np.diff(preds_inv) > 0
         dir_acc = np.mean(dir_actual == dir_pred) if len(dir_actual) > 0 else 0
         
-        # Next day prediction
         last_seq = torch.FloatTensor(prices_scaled[-seq_len:]).unsqueeze(0).unsqueeze(-1).to(device)
         with torch.no_grad():
             next_pred_scaled = model(last_seq).cpu().numpy()[0, 0]
@@ -289,9 +268,6 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         current = prices[-1]
         change_pct = (next_pred - current) / current * 100
         direction = "📈 OMHOOG" if change_pct > 0.5 else ("📉 OMLAAG" if change_pct < -0.5 else "➡️ NEUTRAAL")
-        
-        mse = np.mean((preds_inv - actuals_inv)**2)
-        mae = np.mean(np.abs(preds_inv - actuals_inv))
         
         summary = f"""
 ### 🧠 LSTM Deep Learning Analyse voor **{ticker}**
@@ -302,16 +278,10 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
 
 #### Model Metrics (test set)
 - **Direction Accuracy:** {dir_acc:.1%}
-- **MAE:** ${mae:.2f}
-- **MSE:** {mse:.2f}
-- **Epochs getraind:** {epochs}
-- **Sequence length:** {seq_len} dagen
-- **Device:** {device}
-
-> **Let op:** LSTM is getraind op pure prijssequenties (geen externe features). Demonstratie-doeleinden. Overfitting mogelijk bij korte periodes. Combineer altijd met andere analyses.
+- **MAE:** ${np.mean(np.abs(preds_inv - actuals_inv)):.2f}
+- **MSE:** {np.mean((preds_inv - actuals_inv)**2):.2f}
 """
         
-        # Chart
         test_dates = df.index[train_size:]
         min_len = min(len(test_dates), len(actuals_inv))
         test_dates = test_dates[-min_len:]
@@ -326,12 +296,10 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
                                  name='Next Pred', marker=dict(size=12, color='orange'),
                                  text=[f"${next_pred:.2f}"], textposition="top center"))
         
-        fig.update_layout(title=f"LSTM Price Prediction - {ticker}", height=500,
-                          xaxis_title="Datum", yaxis_title="Prijs ($)")
+        fig.update_layout(title=f"LSTM Price Prediction - {ticker}", height=500)
         
-        # Loss curve
         loss_fig = go.Figure(go.Scatter(y=losses, mode='lines+markers', name='Train Loss'))
-        loss_fig.update_layout(title="Training Loss per Epoch", height=300, xaxis_title="Epoch", yaxis_title="MSE Loss")
+        loss_fig.update_layout(title="Training Loss per Epoch", height=300)
         
         return summary, fig, loss_fig
     
@@ -339,7 +307,7 @@ def run_lstm(ticker, period="2y", epochs=15, seq_len=30):
         return f"Fout bij LSTM analyse: {str(e)}", None, None
 
 # -----------------------
-# Combined / Multi ticker simple view
+# Multi Ticker Scan
 # -----------------------
 def quick_scan(tickers_str):
     tickers = [t.strip().upper() for t in tickers_str.replace(',', ' ').split() if t.strip()]
@@ -347,7 +315,7 @@ def quick_scan(tickers_str):
         return "Voer minstens één ticker in (bijv. AAPL MSFT TSLA)"
     
     results = []
-    for t in tickers[:8]:  # limit
+    for t in tickers[:8]:
         try:
             stock = yf.Ticker(t)
             df = stock.history(period="6mo")
@@ -372,15 +340,12 @@ def quick_scan(tickers_str):
     return "\n\n".join(results)
 
 # -----------------------
-# Gradio Interface
+# Gradio Interface (ALL UI COMPONENT CALLS MUST BE INSIDE THIS BLOCK)
 # -----------------------
 with gr.Blocks(title="AI Stock Trading Dashboard", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
     # 🤖 AI Stock Trading Analysis Dashboard
     **Ensemble Machine Learning** (Random Forest + Gradient Boosting) + **Deep Learning LSTM**
-    
-    Voer een ticker in (bijv. AAPL, TSLA, ASML, NVDA) en analyseer met beide methoden.
-    Gebouwd als demonstratie op basis van de twee AI-methoden die je noemde.
     """)
     
     with gr.Tab("📈 Ensemble ML (Tabular)"):
@@ -403,7 +368,7 @@ with gr.Blocks(title="AI Stock Trading Dashboard", theme=gr.themes.Soft()) as de
         with gr.Row():
             lstm_ticker = gr.Textbox(label="Ticker", value="AAPL", placeholder="Bijv. AAPL")
             lstm_period = gr.Dropdown(["1y", "2y", "5y"], value="2y", label="Periode data")
-            lstm_epochs = gr.Slider(5, 30, value=12, step=1, label="Training Epochs (meer = trager)")
+            lstm_epochs = gr.Slider(5, 30, value=12, step=1, label="Training Epochs")
             lstm_btn = gr.Button("Train & Analyseer LSTM", variant="primary")
         
         lstm_out = gr.Markdown()
@@ -414,38 +379,12 @@ with gr.Blocks(title="AI Stock Trading Dashboard", theme=gr.themes.Soft()) as de
         lstm_btn.click(run_lstm, inputs=[lstm_ticker, lstm_period, lstm_epochs], outputs=[lstm_out, lstm_chart, lstm_loss])
     
     with gr.Tab("🔍 Quick Multi-Ticker Scan"):
-        gr.Markdown("### Snelle technische scan voor meerdere tickers (geen full model training)")
+        gr.Markdown("### Snelle technische scan voor meerdere tickers")
         multi_in = gr.Textbox(label="Tickers (spatie of komma gescheiden)", value="AAPL MSFT GOOGL TSLA NVDA", lines=2)
         multi_btn = gr.Button("Scan", variant="primary")
         multi_out = gr.Markdown()
+        
         multi_btn.click(quick_scan, inputs=multi_in, outputs=multi_out)
-    
-    with gr.Tab("ℹ️ Uitleg & Tips"):
-        gr.Markdown("""
-        ## Hoe dit dashboard werkt
-        
-        ### 1. Ensemble Machine Learning
-        - Haalt historische data via Yahoo Finance
-        - Berekent 15+ technische indicators (RSI, MACD, SMA, Bollinger, ATR, OBV, etc.)
-        - Traint **Random Forest** en **Gradient Boosting** classifiers om volgende-dag richting (up/down) te voorspellen
-        - Ensemble = gemiddelde van de twee kansen
-        - Toont accuracy op hold-out test set + feature importance + laatste signaal
-        
-        ### 2. Deep Learning LSTM
-        - Gebruikt alleen de Close-prijs als time-series
-        - LSTM met 2 lagen, sequence length 30 dagen
-        - Traint op 80% data, test op rest
-        - Voorspelt volgende close-prijs + direction accuracy
-        
-        ### Tips
-        - Gebruik bekende liquid tickers (AAPL, MSFT, TSLA, ASML, etc.)
-        - Meer data (2y/5y) geeft stabielere modellen
-        - LSTM training duurt 10-60 seconden afhankelijk van epochs en hardware
-        - Dit is een **research / educatie dashboard**, geen live trading bot
-        - Combineer altijd met fundamentele analyse, nieuws en risk management
-        
-        **Disclaimer:** Geen financieel advies. Markten zijn onvoorspelbaar. Test zelf grondig.
-        """)
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
